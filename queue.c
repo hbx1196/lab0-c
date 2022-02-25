@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -123,12 +124,12 @@ bool q_insert_tail(struct list_head *head, char *s)
  */
 element_t *q_remove_head(struct list_head *head, char *sp, size_t bufsize)
 {
-    if (!head || head->next == head)
+    if (!head || list_empty(head))
         return NULL;
     element_t *rm = list_first_entry(head, element_t, list);
     if (sp) {
         int len = strlen(rm->value);
-        len = len < bufsize ? len : bufsize;
+        len = len < bufsize - 1 ? len : bufsize - 1;
         strncpy(sp, rm->value, len);
         sp[len] = '\0';
     }
@@ -150,7 +151,7 @@ element_t *q_remove_tail(struct list_head *head, char *sp, size_t bufsize)
     element_t *rm = list_last_entry(head, element_t, list);
     if (sp) {
         int len = strlen(rm->value);
-        len = len < bufsize ? len : bufsize;
+        len = len < bufsize - 1 ? len : bufsize - 1;
         strncpy(sp, rm->value, len);
         sp[len] = '\0';
     }
@@ -207,9 +208,8 @@ bool q_delete_mid(struct list_head *head)
         low = &(*low)->next;
     del = *low;
     *low = (*low)->next;
-    element_t *del_ele = list_entry(del, element_t, list);
-    free(del_ele->value);
-    free(del_ele);
+    q_release_element(list_entry(del, element_t, list));
+
     return true;
 }
 
@@ -225,6 +225,24 @@ bool q_delete_mid(struct list_head *head)
 bool q_delete_dup(struct list_head *head)
 {
     // https://leetcode.com/problems/remove-duplicates-from-sorted-list-ii/
+
+    if (!head || list_empty(head))
+        return false;
+
+    struct list_head *cur, *del;
+    char *val = NULL;
+
+    list_for_each (cur, head) {
+        char *str = list_entry(cur, element_t, list)->value;
+        if (!val || strcmp(val, str))
+            val = str;
+        else {
+            del = cur;
+            cur = cur->prev;
+            list_del(del);
+            q_release_element(list_entry(del, element_t, list));
+        }
+    }
     return true;
 }
 
@@ -234,6 +252,19 @@ bool q_delete_dup(struct list_head *head)
 void q_swap(struct list_head *head)
 {
     // https://leetcode.com/problems/swap-nodes-in-pairs/
+    struct list_head **indir, *cur, *nxt;
+
+    indir = &head->next;
+    for (cur = head->next; cur != head && cur->next != head; cur = cur->next) {
+        nxt = cur->next;
+        *indir = nxt;
+        cur->next = nxt->next;
+        nxt->prev = cur->prev;
+        cur->next->prev = cur;
+        cur->prev = nxt;
+        nxt->next = cur;
+        indir = &cur->next;
+    }
 }
 
 /*
@@ -245,7 +276,7 @@ void q_swap(struct list_head *head)
  */
 void q_reverse(struct list_head *head)
 {
-    if (!head || head->next == head)
+    if (!head || list_empty(head))
         return;
 
     struct list_head *pre, *nxt, *cur, *t;
@@ -270,9 +301,62 @@ void q_reverse(struct list_head *head)
     head->prev = t;
 }
 
+struct list_head *merge(struct list_head *l1, struct list_head *l2)
+{
+    struct list_head *head = NULL, **indir = &head;
+
+    while (l1 && l2) {
+        if (strcmp(list_entry(l1, element_t, list)->value,
+                   list_entry(l2, element_t, list)->value) <= 0) {
+            *indir = l1;
+            l1 = l1->next;
+        } else {
+            *indir = l2;
+            l2 = l2->next;
+        }
+        indir = &(*indir)->next;
+    }
+    *indir = (struct list_head *) ((uintptr_t) l1 | (uintptr_t) l2);
+    return head;
+}
+
+struct list_head *merge_sort(struct list_head *head)
+{
+    if (!head || !head->next)
+        return head;
+
+    struct list_head *slow, *fast, *head2;
+
+    for (slow = head, fast = head->next; fast && fast->next;
+         fast = fast->next->next)
+        slow = slow->next;
+
+    head2 = slow->next;
+    slow->next = NULL;
+    head = merge_sort(head);
+    head2 = merge_sort(head2);
+    return merge(head, head2);
+}
+
+
 /*
  * Sort elements of queue in ascending order
  * No effect if q is NULL or empty. In addition, if q has only one
  * element, do nothing.
  */
-void q_sort(struct list_head *head) {}
+void q_sort(struct list_head *head)
+{
+    if (!head || list_empty(head) || list_is_singular(head))
+        return;
+
+    head->prev->next = NULL;
+    head->next = merge_sort(head->next);
+
+    struct list_head *cur, *pre;
+    for (cur = head->next, pre = head; cur; cur = cur->next) {
+        cur->prev = pre;
+        pre = cur;
+    }
+    pre->next = head;
+    head->prev = pre;
+}
